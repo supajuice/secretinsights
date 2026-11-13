@@ -1,0 +1,17 @@
+# Supa Juice colours: pouch blue on cream.
+[theme]
+base = "light"
+primaryColor = "#1340c8"
+backgroundColor = "#fffdf3"
+secondaryBackgroundColor = "#fff1b8"
+textColor = "#0e1a3d"
+font = "sans-serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "viewer"

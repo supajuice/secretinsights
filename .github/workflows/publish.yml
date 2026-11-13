@@ -1,0 +1,62 @@
+# Every hour: read the orders and the books, make the public snapshot, and publish the dashboard.
+# It uses the READ-ONLY keys from the repo's secrets: they only open the insights action (numbers,
+# no customer details) and can't change anything. They never go into the published site. If anything can't be read, nothing is published and the last good
+# dashboard stays up (GitHub emails a failure notice).
+name: Publish the dashboard
+
+on:
+  schedule:
+    - cron: "7 * * * *"      # every hour, at 7 minutes past
+  workflow_dispatch:          # the "Run workflow" button, to refresh now
+  push:
+    branches: [main]
+
+permissions:
+  contents: write             # only for the monthly keep-alive commit below
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Tests
+        run: python -m unittest discover -s tests -t .
+      - name: Read the orders and books, and build the site
+        env:
+          ORDERS_READ_KEY: ${{ secrets.ORDERS_READ_KEY }}
+          BOOKS_READ_KEY: ${{ secrets.BOOKS_READ_KEY }}
+          ORDERS_URL: ${{ vars.ORDERS_URL }}
+          BOOKS_URL: ${{ vars.BOOKS_URL }}
+        run: python scripts/build_site.py
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+      # GitHub pauses hourly runs in a repo with no new commits for 60 days. When the last
+      # commit is over 30 days old, an empty commit keeps them going.
+      - name: Keep the hourly refresh switched on
+        if: github.event_name == 'schedule'
+        run: |
+          if [ $(( $(date +%s) - $(git log -1 --format=%ct) )) -gt 2592000 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "Keep the hourly dashboard refresh switched on"
+            git push
+          fi
