@@ -30,7 +30,8 @@ class Pages(unittest.TestCase):
 
     def test_sample_data_says_so(self):
         at = app().run()
-        self.assertTrue(any("Sample data" in i.value for i in at.sidebar.info))
+        self.assertTrue(any("Sample data" in c.value for c in at.caption))
+        self.assertTrue(any("made-up numbers" in i.value for i in at.info))
         self.assertTrue(any(m.label == "Website sales" for m in at.metric))
 
 
@@ -58,8 +59,8 @@ class Online(unittest.TestCase):
                 at.switch_page(page)
                 at.run()
                 self.assertEqual(list(at.exception), [], page)
-                self.assertTrue(any("Updated 12 Nov 2026, 09:07" in c.value for c in at.sidebar.caption))
-                self.assertEqual(len(at.sidebar.button), 0, "no refresh button: the Action refreshes it")
+                self.assertTrue(any("Updated 12 Nov 2026, 09:07" in c.value for c in at.caption))
+                self.assertEqual(len(at.button), 0, "no refresh button: the Action refreshes it")
                 if page == "views/customers.py":
                     for table in at.dataframe:
                         self.assertNotIn("Email", list(table.value.columns), "no list of customers online")

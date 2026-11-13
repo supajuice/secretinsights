@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import streamlit as st
 
-from sj import metrics, sources
+from sj import charts, metrics, sources
 
 st.set_page_config(page_title="Supa Juice insights", page_icon=":material/monitoring:", layout="wide")
 
@@ -40,33 +40,41 @@ orders = metrics.orders_frame(data.orders)
 first_day = orders["created_day"].min().date() if len(orders) and not orders["created_day"].isna().all() else date(today.year, 3, 1)
 st.session_state["private"] = data.mode != "snapshot"  # names and emails can be shown
 
-# ---- Sidebar: which period, where the numbers come from ----
-with st.sidebar:
-    st.markdown("### Supa Juice insights")
-    choice = st.selectbox("Period", metrics.PERIODS, index=metrics.PERIODS.index("Last 3 months"), key="period")
+charts.style()
+
+pages = st.navigation([
+    st.Page("views/overview.py", title="Overview", icon=":material/dashboard:", default=True),
+    st.Page("views/sales.py", title="Sales", icon=":material/shopping_bag:"),
+    st.Page("views/customers.py", title="Customers", icon=":material/group:"),
+    st.Page("views/money.py", title="Money", icon=":material/account_balance:"),
+], position="top")
+
+# ---- The same header on every page: the page, the period, where the numbers come from ----
+left, right = st.columns([3, 2], vertical_alignment="bottom")
+with right:
+    if data.mode != "snapshot":
+        pick, more = st.columns([3, 2], vertical_alignment="bottom")
+    else:
+        pick, more = right, None
+    choice = pick.selectbox("Period", metrics.PERIODS, index=metrics.PERIODS.index("Last 3 months"), key="period")
+    if more is not None and more.button("Refresh", icon=":material/refresh:", width="stretch", help="Read the orders and the books again"):
+        load.clear()
+        live_report.clear()
+        st.rerun()
     custom = None
     if choice == "Custom":
         picked = st.date_input("From – to", value=(first_day, today), min_value=date(2025, 1, 1), max_value=today, format="DD/MM/YYYY")
         if isinstance(picked, tuple) and len(picked) == 2:
             custom = picked
-    start, end = metrics.period(choice, today, first_day, custom)
-    st.caption(f"{start:%d %b %Y} to {end:%d %b %Y}")
-
-    st.divider()
-    if data.mode == "demo":
-        st.info("**Sample data.** These are made-up numbers. Add the keys to `.streamlit/secrets.toml` to see the real ones (see README).", icon=":material/science:")
-    elif data.mode == "snapshot":
-        st.caption(f"Updated {data.generated} (Cape Town). The numbers are refreshed every hour.")
-    else:
-        st.success(f"Live: {len(data.orders)} orders and the books.", icon=":material/cloud_done:")
-    for p in data.problems:
-        st.warning(p, icon=":material/error:")
-    if data.mode != "snapshot" and st.button("Refresh the numbers", icon=":material/refresh:", width="stretch"):
-        load.clear()
-        live_report.clear()
-        st.rerun()
-    st.caption("Read only: nothing here changes an order or the books." if data.mode != "snapshot"
-               else "No customer names or contact details are on this page.")
+start, end = metrics.period(choice, today, first_day, custom)
+with left:
+    source = {"snapshot": f"Updated {data.generated}", "demo": "Sample data", "live": "Live"}[data.mode]
+    charts.header(pages.title, f"{start.day} {start:%b %Y} – {end.day} {end:%b %Y}  ·  {source}")
+if data.mode == "demo":
+    st.info("These are made-up numbers. Add the keys to `.streamlit/secrets.toml` to see the real ones (see README).", icon=":material/science:")
+for p in data.problems:
+    st.warning(p, icon=":material/error:")
+st.divider()
 
 
 def report_for(a: date, b: date) -> dict:
@@ -82,10 +90,9 @@ def report_for(a: date, b: date) -> dict:
 
 st.session_state["ctx"] = {"data": data, "orders": orders, "start": start, "end": end, "today": today, "report_for": report_for}
 
-pages = st.navigation([
-    st.Page("views/overview.py", title="Overview", icon=":material/dashboard:", default=True),
-    st.Page("views/sales.py", title="Sales", icon=":material/shopping_bag:"),
-    st.Page("views/customers.py", title="Customers", icon=":material/group:"),
-    st.Page("views/money.py", title="Money", icon=":material/account_balance:"),
-])
 pages.run()
+
+st.divider()
+st.caption({"snapshot": "Refreshed every hour. Read only: no customer names or contact details are on this page.",
+            "demo": "Sample data: made-up numbers, to show how the dashboard works.",
+            "live": "Live from the orders and the books. Read only: nothing here changes an order or the books."}[data.mode])

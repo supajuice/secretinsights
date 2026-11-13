@@ -73,7 +73,7 @@ def index_html() -> str:
   <title>Supa Juice insights</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser@%(v)s/build/stlite.css">
   <style>
-    html, body { margin: 0; background: #fffdf3; color: #0e1a3d; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    html, body { margin: 0; background: #faf9f5; color: #0e1a3d; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
     #loading { display: grid; place-items: center; min-height: 100vh; padding: 16px; text-align: center; }
     #loading p { max-width: 28rem; line-height: 1.5; }
     #loading strong { display: block; font-size: 1.4rem; margin-bottom: .4rem; }
@@ -91,8 +91,8 @@ def index_html() -> str:
       streamlitConfig: {
         "theme.base": "light",
         "theme.primaryColor": "#1340c8",
-        "theme.backgroundColor": "#fffdf3",
-        "theme.secondaryBackgroundColor": "#fff1b8",
+        "theme.backgroundColor": "#faf9f5",
+        "theme.secondaryBackgroundColor": "#f2f0e8",
         "theme.textColor": "#0e1a3d",
         "client.toolbarMode": "viewer"
       },
