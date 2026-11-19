@@ -92,6 +92,48 @@ class Sources(unittest.TestCase):
             sources._post = real
         self.assertEqual(sent, ["list", "list", "report"])
 
+    def test_no_answer_is_tried_again_but_a_refusal_is_not(self):
+        import requests
+
+        calls = []
+
+        class Reply:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def json(self):
+                return self.body
+
+        def flaky(url, **kw):
+            calls.append(url)
+            if len(calls) < 3:
+                raise requests.ReadTimeout("slow")
+            return Reply({"ok": True, "orders": []})
+
+        real_post, real_pauses, real_sleep = requests.post, sources.RETRY_PAUSES, sources.time.sleep
+        requests.post, sources.RETRY_PAUSES, sources.time.sleep = flaky, (10, 30), lambda s: None
+        try:
+            self.assertEqual(sources._post("https://x/exec", {"action": "insights"}), {"ok": True, "orders": []})
+            self.assertEqual(len(calls), 3, "two slow tries, then it answered")
+
+            calls.clear()
+            requests.post = lambda url, **kw: (calls.append(url), (_ for _ in ()).throw(requests.ReadTimeout("slow")))[1]
+            with self.assertRaises(sources.SourceError) as ctx:
+                sources._post("https://x/exec", {"action": "insights"})
+            self.assertEqual(len(calls), 3)
+            self.assertIn("after 3 tries", str(ctx.exception))
+
+            calls.clear()
+            requests.post = lambda url, **kw: (calls.append(url), Reply({"ok": False, "message": "That read key is not right."}))[1]
+            with self.assertRaises(sources.SourceError) as ctx:
+                sources._post("https://x/exec", {"action": "insights"})
+            self.assertEqual(len(calls), 1, "an answer, even a refusal, is not asked again")
+            self.assertEqual(str(ctx.exception), "That read key is not right.")
+        finally:
+            requests.post, sources.RETRY_PAUSES, sources.time.sleep = real_post, real_pauses, real_sleep
+
     def test_a_refusal_is_shown_not_crashed(self):
         def fake(url, body):
             raise sources.SourceError("That key is not right.")

@@ -20,13 +20,18 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
 
 from . import demo
 
 SNAPSHOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data.json")
 
-TIMEOUT = 60  # seconds; Apps Script can be slow to wake up
+TIMEOUT = 90  # seconds per try; Apps Script can be slow to wake up
+# Google's Apps Scripts now and then take over a minute to answer (a "cold start" after a quiet
+# spell). When there's no answer at all, try again after these pauses (seconds). A script that
+# answers, even with an error such as a wrong key, is never asked again.
+RETRY_PAUSES = (10, 30)
 
 
 class SourceError(Exception):
@@ -47,10 +52,18 @@ def _post(url: str, body: dict) -> dict:
     # JSON, which requests follows as a GET. (Imported here: the online page never needs it.)
     import requests
 
-    try:
-        res = requests.post(url, data=json.dumps(body), headers={"Content-Type": "text/plain;charset=utf-8"}, timeout=TIMEOUT)
-    except requests.RequestException as err:
-        raise SourceError("Could not reach it (" + type(err).__name__ + ").") from err
+    pauses = list(RETRY_PAUSES)
+    while True:
+        try:
+            res = requests.post(url, data=json.dumps(body), headers={"Content-Type": "text/plain;charset=utf-8"}, timeout=TIMEOUT)
+            break
+        except (requests.Timeout, requests.ConnectionError) as err:
+            if not pauses:
+                tries = len(RETRY_PAUSES) + 1
+                raise SourceError("Could not reach it after " + str(tries) + " tries (" + type(err).__name__ + ").") from err
+            time.sleep(pauses.pop(0))
+        except requests.RequestException as err:
+            raise SourceError("Could not reach it (" + type(err).__name__ + ").") from err
     try:
         reply = res.json()
     except ValueError as err:
