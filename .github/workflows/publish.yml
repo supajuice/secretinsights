@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy_again.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,7 +46,16 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+      # Now and then GitHub can't find the site it uploaded a moment ago ("No artifacts named
+      # github-pages were found"). That's on GitHub's side, so wait a minute and try once more.
       - id: deploy
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Wait a minute before trying again
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 60
+      - id: deploy_again
+        if: steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@v4
 
       # GitHub pauses hourly runs in a repo with no new commits for 60 days. When the last

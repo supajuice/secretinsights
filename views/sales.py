@@ -7,11 +7,14 @@ orders, start, end = c["orders"], c["start"], c["end"]
 
 s = metrics.sales_summary(orders, start, end)
 charts.tiles([
-    ("Orders", charts.count(s["orders"])),
+    ("Paid orders", charts.count(s["orders"]), None, "Paid and delivered website orders, by the day they were paid. Orders still waiting for payment, and cancelled ones, are not counted."),
     ("Customers", charts.count(s["customers"]), None, "Different people who bought in the period."),
     ("Delivery fees charged", charts.rand(s["delivery_fees"])),
     ("Discounts given", charts.rand(s["discounts"]), None, "What the sachets would have cost without a discount code, minus what was paid."),
 ])
+_unpaid = metrics.unpaid_note(metrics.awaiting_payment(orders, start, end))
+if _unpaid:
+    st.caption(_unpaid)
 
 f = metrics.flavour_mix(orders, start, end)
 stt = metrics.status_counts(orders, start, end)

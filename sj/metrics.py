@@ -128,6 +128,21 @@ def sales_summary(df: pd.DataFrame, start: date, end: date) -> dict:
     }
 
 
+def awaiting_payment(df: pd.DataFrame, start: date, end: date) -> int:
+    """Orders placed in the period that aren't paid yet (not counted as sales until they are).
+    Cancelled orders are left out."""
+    s = between(df, "created_day", start, end)
+    return int((~s["sold"] & (s["status"] != "Cancelled")).sum())
+
+
+def unpaid_note(n: int) -> str:
+    """The line under the order tiles, or '' when every order in the period is paid."""
+    if not n:
+        return ""
+    word = "order" if n == 1 else "orders"
+    return f"Plus {n} {word} waiting for payment. They count once they're paid; Orders by status on the Sales page shows every order."
+
+
 def sales_over_time(df: pd.DataFrame, start: date, end: date, every: str) -> pd.DataFrame:
     """Revenue, orders and sachets per day, week (starting Monday) or month, with empty ones as zero."""
     s = sales(df, start, end)

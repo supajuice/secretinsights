@@ -37,6 +37,14 @@ class Orders(unittest.TestCase):
         self.assertEqual(s["customers"], 2, "emails are matched without case or spaces")
         self.assertEqual(metrics.sales_summary(self.df, date(2026, 9, 1), date(2026, 9, 30))["orders"], 0)
 
+    def test_unpaid_orders_are_counted_apart(self):
+        # SJ-3 is waiting for payment, SJ-6 was delivered but not paid; SJ-4 is cancelled.
+        self.assertEqual(metrics.awaiting_payment(self.df, date(2026, 10, 1), date(2026, 10, 31)), 2)
+        self.assertEqual(metrics.awaiting_payment(self.df, date(2026, 9, 1), date(2026, 9, 30)), 0)
+        self.assertEqual(metrics.unpaid_note(0), "")
+        self.assertTrue(metrics.unpaid_note(1).startswith("Plus 1 order waiting for payment."))
+        self.assertTrue(metrics.unpaid_note(4).startswith("Plus 4 orders waiting for payment."))
+
     def test_codes_flavours_and_fulfilment(self):
         k = metrics.codes(self.df, date(2026, 10, 1), date(2026, 10, 31))
         self.assertEqual(k.to_dict("records"), [{"code": "SUPA15", "orders": 1, "discount": 60.0, "revenue": 409.0}])

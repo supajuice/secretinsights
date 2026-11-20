@@ -33,6 +33,7 @@ class Pages(unittest.TestCase):
         self.assertTrue(any("Sample data" in c.value for c in at.caption))
         self.assertTrue(any("made-up numbers" in i.value for i in at.info))
         self.assertTrue(any(m.label == "Website sales" for m in at.metric))
+        self.assertTrue(any(m.label == "Paid orders" for m in at.metric))
 
 
 class Online(unittest.TestCase):
