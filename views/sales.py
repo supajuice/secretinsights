@@ -6,15 +6,21 @@ c = st.session_state["ctx"]
 orders, start, end = c["orders"], c["start"], c["end"]
 
 s = metrics.sales_summary(orders, start, end)
+split = metrics.order_split(orders, start, end)
 charts.tiles([
-    ("Paid orders", charts.count(s["orders"]), None, "Paid and delivered website orders, by the day they were paid. Orders still waiting for payment, and cancelled ones, are not counted."),
+    ("Orders", charts.count(split["total"]), metrics.split_note(split), metrics.ORDERS_HELP),
     ("Customers", charts.count(s["customers"]), None, "Different people who bought in the period."),
     ("Delivery fees charged", charts.rand(s["delivery_fees"])),
     ("Discounts given", charts.rand(s["discounts"]), None, "What the sachets would have cost without a discount code, minus what was paid."),
 ])
-_unpaid = metrics.unpaid_note(metrics.awaiting_payment(orders, start, end))
-if _unpaid:
-    st.caption(_unpaid)
+with charts.card("Orders placed, paid and unpaid", "By the day each order was placed, and where it is now."):
+    every = st.segmented_control("Group by", ["Week", "Month"], default="Week" if (end - start).days <= 120 else "Month",
+                                 key="s_every", label_visibility="collapsed") or "Week"
+    ot = metrics.orders_over_time(orders, start, end, every)
+    charts.show(charts.stacked_over_time(ot, "kind", "orders", every, charts.PAID_UNPAID, "Orders"),
+                ot.pivot(index="period", columns="kind", values="orders").reset_index()
+                .assign(period=lambda d: d["period"].dt.strftime("%d %b %Y")).rename(columns={"period": every}),
+                key="s_paid_unpaid")
 
 f = metrics.flavour_mix(orders, start, end)
 stt = metrics.status_counts(orders, start, end)

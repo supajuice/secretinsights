@@ -8,6 +8,7 @@ orders, start, end = c["orders"], c["start"], c["end"]
 before = metrics.previous(start, end)
 
 now, then = metrics.sales_summary(orders, start, end), metrics.sales_summary(orders, *before)
+split = metrics.order_split(orders, start, end)
 rep, rep_before = c["report_for"](start, end), c["report_for"](*before)
 ps = rep.get("perSachet") or {}
 ty = rep.get("taxYear") or {}
@@ -16,14 +17,10 @@ profit_before = (rep_before or {}).get("profit") or 0
 charts.tiles([
     ("Website sales", charts.rand(now["revenue"]), metrics.change(now["revenue"], then["revenue"]),
      "Paid and delivered website orders, by the day they were paid. Includes delivery fees, after discounts."),
-    ("Paid orders", charts.count(now["orders"]), metrics.change(now["orders"], then["orders"]),
-     "Paid and delivered website orders, by the day they were paid. Orders still waiting for payment, and cancelled ones, are not counted."),
+    ("Orders", charts.count(split["total"]), metrics.split_note(split), metrics.ORDERS_HELP),
     ("Sachets sold", charts.count(now["sachets"]), metrics.change(now["sachets"], then["sachets"])),
     ("Average order", charts.rand(now["avg_order"]), metrics.change(now["avg_order"], then["avg_order"])),
 ])
-_unpaid = metrics.unpaid_note(metrics.awaiting_payment(orders, start, end))
-if _unpaid:
-    st.caption(_unpaid)
 charts.tiles([
     ("Profit", charts.rand(rep.get("profit")), metrics.change(rep.get("profit") or 0, profit_before) if profit_before > 0 else None,
      "From the books: all income minus every expense and card fee in the period. Cash basis."),

@@ -96,6 +96,14 @@ class ReadOnly(unittest.TestCase):
 
 
 class Build(unittest.TestCase):
+    def test_every_page_goes_online(self):
+        import re
+        with open(os.path.join(ROOT, "app.py"), encoding="utf-8") as f:
+            pages = re.findall(r'st\.Page\("([^"]+)"', f.read())
+        self.assertTrue(pages)
+        for p in pages:
+            self.assertIn(p, build_site.APP_FILES, f"{p} is a page but isn't published online")
+
     def test_build_the_site_from_the_sample_data(self):
         out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "build_site.py"), "--demo"], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)

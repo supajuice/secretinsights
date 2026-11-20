@@ -7,7 +7,7 @@ from streamlit.testing.v1 import AppTest
 from sj import metrics, sources
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
-PAGES = ["views/overview.py", "views/sales.py", "views/customers.py", "views/money.py"]
+PAGES = ["views/overview.py", "views/sales.py", "views/customers.py", "views/money.py", "views/investor.py"]
 
 
 def app():
@@ -33,7 +33,7 @@ class Pages(unittest.TestCase):
         self.assertTrue(any("Sample data" in c.value for c in at.caption))
         self.assertTrue(any("made-up numbers" in i.value for i in at.info))
         self.assertTrue(any(m.label == "Website sales" for m in at.metric))
-        self.assertTrue(any(m.label == "Paid orders" for m in at.metric))
+        self.assertTrue(any(m.label == "Orders" and "paid" in (m.delta or "") for m in at.metric), "orders show the paid / unpaid split")
 
 
 class Online(unittest.TestCase):

@@ -47,6 +47,7 @@ pages = st.navigation([
     st.Page("views/sales.py", title="Sales", icon=":material/shopping_bag:"),
     st.Page("views/customers.py", title="Customers", icon=":material/group:"),
     st.Page("views/money.py", title="Money", icon=":material/account_balance:"),
+    st.Page("views/investor.py", title="Investor view", icon=":material/rocket_launch:"),
 ], position="top")
 
 # ---- The same header on every page: the page, the period, where the numbers come from ----

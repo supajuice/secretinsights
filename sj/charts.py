@@ -27,6 +27,8 @@ SLOTS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#625
 CATEGORY_COLOURS = dict(zip(["Ingredients", "Packaging", "Shipping & boxes", "Payment fees", "Tech & software", "Marketing", "Other"], SLOTS))
 STATUS_COLOURS = {"New request": SLOTS[6], "Awaiting payment": SLOTS[3], "Paid": SLOTS[0], "Delivered": SLOTS[2], "Cancelled": "#9a9fb3"}
 NEW_RETURNING = {"New": SLOTS[0], "Returning": SLOTS[2]}
+PAID_UNPAID = {"Paid": SLOTS[0], "Unpaid": SLOTS[3], "Cancelled": "#9a9fb3"}
+UNIT = {"In": SLOTS[0], "Promo": SLOTS[4], "Cost": SLOTS[1], "Profit": SLOTS[2], "Loss": SLOTS[7]}
 INCOME_COSTS = {"Income": SLOTS[0], "Costs": SLOTS[1]}
 
 FONT = "Source Sans 3, Source Sans Pro, system-ui, -apple-system, Segoe UI, sans-serif"  # Streamlit's own
@@ -51,6 +53,8 @@ h1 { font-size: 1.75rem !important; font-weight: 700 !important; padding: 0 !imp
 [data-testid="stMetricLabel"] p { font-size: 0.85rem !important; color: %(muted)s !important; font-weight: 500 !important; }
 [data-testid="stMetricValue"] { font-size: 1.7rem !important; font-weight: 650 !important; color: %(ink)s !important; }
 [data-testid="stMetricDelta"] { font-size: 0.8rem !important; }
+/* A note under a number ("31 paid · 4 unpaid · 1 cancelled") wraps instead of being cut off */
+[data-testid="stMetricDelta"], [data-testid="stMetricDelta"] * { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; height: auto !important; }
 /* "See the numbers": a quiet line, not a box */
 [data-testid="stExpander"] details { border: 0 !important; border-top: 1px solid %(line)s !important; border-radius: 0 !important; background: transparent !important; }
 [data-testid="stExpander"] summary { padding-left: 0 !important; padding-right: 0 !important; }
@@ -119,7 +123,10 @@ def tiles(items: list[tuple]) -> None:
         label, value = item[0], item[1]
         delta = item[2] if len(item) > 2 else None
         help_ = item[3] if len(item) > 3 else None
-        col.metric(label, value, delta=None if delta is None else f"{delta:+.0f}% vs before", help=help_, border=True)
+        if isinstance(delta, str):  # a note under the number, such as "31 paid · 4 unpaid", in grey with no arrow
+            col.metric(label, value, delta=delta, delta_color="off", delta_arrow="off", help=help_, border=True)
+        else:
+            col.metric(label, value, delta=None if delta is None else f"{delta:+.0f}% vs before", help=help_, border=True)
 
 
 def show(chart: alt.Chart, table: pd.DataFrame, key: str, height: int = HEIGHT) -> None:
@@ -173,6 +180,56 @@ def bars_over_time(df: pd.DataFrame, x: str, y: str, every: str, label: str, mon
         tooltip=[alt.Tooltip(f"{x}:T", title={"Day": "Day", "Week": "Week from", "Month": "Month"}[every], format=fmt),
                  alt.Tooltip("_v:N", title=label)],
     )
+
+
+def stacked_over_time(df: pd.DataFrame, group: str, value: str, every: str, colours: dict, label: str) -> alt.Chart:
+    """df: period, group, value. Stacked bars per week or month, each group in its own colour."""
+    fmt = {"Week": "%d %b", "Month": "%b %Y"}[every]
+    unit = {"Week": "yearmonthdate", "Month": "yearmonth"}[every]
+    present = [k for k in colours if k in set(df[group])]
+    return alt.Chart(df).mark_bar(stroke="white", strokeWidth=1, width={"band": 0.6}).encode(
+        x=alt.X(f"{unit}(period):O", title=None, axis=alt.Axis(format=fmt, labelAngle=0, labelOverlap="greedy")),
+        y=alt.Y(f"{value}:Q", stack=True, axis=_axis(False)),
+        color=alt.Color(f"{group}:N", scale=alt.Scale(domain=present, range=[colours[k] for k in present]), sort=present),
+        order=alt.Order("_o:Q"),
+        tooltip=[alt.Tooltip("period:T", title={"Week": "Week from", "Month": "Month"}[every], format=fmt),
+                 alt.Tooltip(f"{group}:N", title=" "), alt.Tooltip(f"{value}:Q", title=label)],
+    ).transform_calculate(_o=" + ".join(f"(datum.{group} == '{k}' ? {i} : 0)" for i, k in enumerate(present)) or "0")
+
+
+def growth_bars(df: pd.DataFrame, every: str) -> alt.Chart:
+    """df: period, revenue, growth. Sales bars with the change on the period before written above each one."""
+    fmt = {"Week": "%d %b", "Month": "%b %Y"}[every]
+    unit = {"Week": "yearmonthdate", "Month": "yearmonth"}[every]
+    d = df.assign(_g=[("" if g is None or pd.isna(g) else f"{g:+.0f}%") for g in df["growth"]])
+    base = alt.Chart(d).transform_calculate(_v=_num("datum.revenue", True)).encode(
+        x=alt.X(f"{unit}(period):O", title=None, axis=alt.Axis(format=fmt, labelAngle=0, labelOverlap="greedy")),
+        y=alt.Y("revenue:Q", axis=_axis(True), scale=alt.Scale(padding=18)),
+        tooltip=[alt.Tooltip("period:T", title={"Week": "Week from", "Month": "Month"}[every], format=fmt),
+                 alt.Tooltip("_v:N", title="Sales"), alt.Tooltip("_g:N", title="Change on the one before")],
+    )
+    bars = base.mark_bar(color=BLUE, width={"band": 0.6})
+    text = base.mark_text(dy=-8, color=MUTED, fontSize=11).encode(text="_g:N")
+    return bars + text
+
+
+def unit_bars(df: pd.DataFrame) -> alt.Chart:
+    """df: part, amount, kind. One bar per line of a sachet's money, coloured by In, Cost or Profit,
+    with + / − written before the amount."""
+    order = df["part"].tolist()
+    present = [k for k in UNIT if k in set(df["kind"])]
+    sign = "(datum.kind == 'Cost' || datum.kind == 'Promo' || datum.kind == 'Loss' ? '−' : (datum.kind == 'In' ? '+' : '='))"
+    base = alt.Chart(df).transform_calculate(
+        _v=sign + " + ' R ' + format(datum.amount, ',.2f')").encode(
+        y=alt.Y("part:N", sort=order, title=None,
+                axis=alt.Axis(domain=False, labelAlign="left", labelPadding=168, minExtent=168, maxExtent=168, labelLimit=156)),
+        x=alt.X("amount:Q", title=None, axis=None, scale=alt.Scale(domainMin=0, nice=False, padding=64)),
+        tooltip=[alt.Tooltip("part:N", title=" "), alt.Tooltip("_v:N", title="Per sachet")],
+    )
+    bars = base.mark_bar(size=18).encode(color=alt.Color("kind:N", scale=alt.Scale(domain=present, range=[UNIT[k] for k in present]),
+                                                         legend=alt.Legend(orient="top", labelExpr="datum.label == 'In' ? 'Money in' : datum.label == 'Promo' ? 'Promo codes' : datum.label")))
+    text = base.mark_text(align="left", dx=6, color=INK, fontSize=12).encode(text="_v:N")
+    return bars + text
 
 
 def hbars(df: pd.DataFrame, cat: str, value: str, label: str, colours: dict | None = None, money: bool = False) -> alt.Chart:

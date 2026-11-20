@@ -37,13 +37,56 @@ class Orders(unittest.TestCase):
         self.assertEqual(s["customers"], 2, "emails are matched without case or spaces")
         self.assertEqual(metrics.sales_summary(self.df, date(2026, 9, 1), date(2026, 9, 30))["orders"], 0)
 
-    def test_unpaid_orders_are_counted_apart(self):
-        # SJ-3 is waiting for payment, SJ-6 was delivered but not paid; SJ-4 is cancelled.
-        self.assertEqual(metrics.awaiting_payment(self.df, date(2026, 10, 1), date(2026, 10, 31)), 2)
-        self.assertEqual(metrics.awaiting_payment(self.df, date(2026, 9, 1), date(2026, 9, 30)), 0)
-        self.assertEqual(metrics.unpaid_note(0), "")
-        self.assertTrue(metrics.unpaid_note(1).startswith("Plus 1 order waiting for payment."))
-        self.assertTrue(metrics.unpaid_note(4).startswith("Plus 4 orders waiting for payment."))
+    def test_every_order_is_counted_and_split(self):
+        # Placed in October: SJ-1, SJ-2 paid; SJ-3 waiting; SJ-4 cancelled; SJ-6 delivered, not paid. SJ-5 was placed in September.
+        sp = metrics.order_split(self.df, date(2026, 10, 1), date(2026, 10, 31))
+        self.assertEqual(sp, {"total": 5, "paid": 2, "unpaid": 2, "cancelled": 1})
+        self.assertEqual(metrics.split_note(sp), "2 paid · 2 unpaid · 1 cancelled")
+        self.assertEqual(metrics.split_note({"total": 3, "paid": 3, "unpaid": 0, "cancelled": 0}), "3 paid · 0 unpaid")
+        t = metrics.orders_over_time(self.df, date(2026, 10, 1), date(2026, 10, 31), "Month")
+        self.assertEqual(dict(zip(t["kind"], t["orders"])), {"Paid": 2, "Unpaid": 2, "Cancelled": 1})
+
+    def test_investor_numbers(self):
+        books = {"entries": {
+            "batch": [{"id": "B1", "date": "2026-09-01", "flavour": "Orange", "sachets": 100, "cost": 1000}],
+            "expense": [{"id": "E1", "date": "2026-10-01", "amount": 300, "category": "Marketing", "paidBy": "Business"}],
+            "money": [{"id": "M1", "date": "2026-09-01", "amount": 5000, "kind": "Capital", "who": "Greg"}]},
+            "settings": {"books_start": "2026-09-01", "card_fees": "none"}}
+        p = metrics.pitch(self.df, books, date(2026, 10, 31))
+        self.assertEqual(p["paid_orders"], 3)
+        self.assertEqual(p["sales_to_date"], 200 + 409 + 200)
+        self.assertEqual(p["orders"]["total"], 6)
+        self.assertEqual(p["customers"], 2)
+        self.assertAlmostEqual(p["price"], (809 - 69) / 20)  # sachet income (after discounts, without delivery) per sachet
+        self.assertEqual(p["cost"], 10)
+        self.assertAlmostEqual(p["margin_pct"], (37 - 10) / 37 * 100)
+        self.assertEqual(p["discounts"], 60, "SUPA15 on SJ-2: 15% of R 400")
+        self.assertEqual(p["cac"], 180, "R 300 of marketing + R 60 of discounts over 2 customers")
+        self.assertEqual(p["put_in"], 5000)
+        self.assertEqual(p["annual_run_rate"], p["last30"] * 12)
+        empty = metrics.pitch(self.df, {}, date(2026, 10, 31))
+        self.assertIsNone(empty["cost"])
+        self.assertIsNone(empty["margin_pct"])
+        self.assertEqual(empty["cac"], 30, "with no expenses, the discounts alone: R 60 over 2 customers")
+        no_batches = {"entries": {"expense": [{"id": "E2", "date": "2026-10-01", "amount": 200, "category": "Ingredients", "paidBy": "Business"}]}}
+        q = metrics.pitch(self.df, no_batches, date(2026, 10, 31))
+        self.assertEqual((q["cost"], q["cost_from"]), (10, "expenses"), "R 200 of ingredients over 20 sachets")
+        self.assertEqual(p["cost_from"], "batches")
+        u = metrics.unit_economics(self.df, books, date(2026, 10, 31))
+        rows = {r.part: (round(r.amount, 2), r.kind) for r in u.itertuples()}
+        self.assertEqual(rows["Full price"], (40.0, "In"))             # R 800 at full price for 20 sachets
+        self.assertEqual(rows["Promo: SUPA15"], (3.0, "Promo"))        # R 60 / 20
+        self.assertEqual(rows["Delivery fees charged"], (3.45, "In"))  # R 69 / 20
+        self.assertEqual(rows["Marketing"], (15.0, "Cost"))            # R 300 / 20
+        self.assertEqual(rows["Profit per sachet"], (25.45, "Profit"))
+        self.assertTrue(metrics.unit_economics(self.df, {}, date(2026, 9, 29)).empty, "nothing sold yet")
+        pc = metrics.promo_codes(self.df, date(2026, 10, 31))
+        self.assertEqual(pc.to_dict("records"), [{"code": "SUPA15", "percent": 15, "orders": 1, "sachets": 10, "sales": 409.0,
+                                                  "discount": 60.0, "new": 1, "per_new": 60.0, "waiting": 0}])
+        self.assertTrue(metrics.promo_codes(self.df, date(2026, 9, 29)).empty)
+        g = metrics.sales_growth(self.df, date(2026, 9, 1), date(2026, 10, 31), "Month")
+        self.assertIsNone(g["growth"].iloc[0])
+        self.assertEqual(metrics.customers_to_date(self.df, date(2026, 9, 1), date(2026, 10, 31), "Month")["customers"].tolist(), [0, 2])
 
     def test_codes_flavours_and_fulfilment(self):
         k = metrics.codes(self.df, date(2026, 10, 1), date(2026, 10, 31))

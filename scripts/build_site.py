@@ -37,7 +37,7 @@ DEFAULT_URLS = {
     "BOOKS_URL": "https://script.google.com/macros/s/AKfycbxCm5RUemZnUjcHdsTgroL8rXJbOHyc0vUWQ9SkBxGBw2fSwWMeqK7B9TnZkhyV86SEpA/exec",
 }
 APP_FILES = ["app.py", "sj/__init__.py", "sj/metrics.py", "sj/charts.py", "sj/sources.py", "sj/demo.py", "sj/snapshot.py",
-             "views/overview.py", "views/sales.py", "views/customers.py", "views/money.py"]
+             "views/overview.py", "views/sales.py", "views/customers.py", "views/money.py", "views/investor.py"]
 CAPE_TOWN = timezone(timedelta(hours=2))
 
 

@@ -10,7 +10,7 @@ rate = metrics.repeat_rate(orders, end)
 period = metrics.sales_summary(orders, start, end)
 charts.tiles([
     ("Customers so far", charts.count(len(everyone)), None, "A customer is one email address (or a name, for DM orders without one), all time."),
-    ("Bought in this period", charts.count(period["customers"])),
+    ("Bought in this period", charts.count(period["customers"]), None, "Different people with a paid order in the period."),
     ("Bought more than once", "–" if rate is None else f"{rate:.0f}%", None, "Of everyone who has bought, up to the end of the period."),
     ("Spent per customer", charts.rand(everyone["spent"].mean() if len(everyone) else None), None, "All time."),
 ])

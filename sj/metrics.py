@@ -128,19 +128,41 @@ def sales_summary(df: pd.DataFrame, start: date, end: date) -> dict:
     }
 
 
-def awaiting_payment(df: pd.DataFrame, start: date, end: date) -> int:
-    """Orders placed in the period that aren't paid yet (not counted as sales until they are).
-    Cancelled orders are left out."""
+def order_split(df: pd.DataFrame, start: date, end: date) -> dict:
+    """Every order placed in the period (by the day it was placed), split by where it is now:
+    paid (Paid or Delivered), unpaid (anything else still open) and cancelled."""
     s = between(df, "created_day", start, end)
-    return int((~s["sold"] & (s["status"] != "Cancelled")).sum())
+    cancelled = int((s["status"] == "Cancelled").sum())
+    paid = int(s["sold"].sum())
+    return {"total": int(len(s)), "paid": paid, "unpaid": int(len(s)) - paid - cancelled, "cancelled": cancelled}
 
 
-def unpaid_note(n: int) -> str:
-    """The line under the order tiles, or '' when every order in the period is paid."""
-    if not n:
-        return ""
-    word = "order" if n == 1 else "orders"
-    return f"Plus {n} {word} waiting for payment. They count once they're paid; Orders by status on the Sales page shows every order."
+def split_note(sp: dict) -> str:
+    """'31 paid · 4 unpaid · 1 cancelled', for under an Orders tile."""
+    note = f"{sp['paid']} paid · {sp['unpaid']} unpaid"
+    return note + (f" · {sp['cancelled']} cancelled" if sp["cancelled"] else "")
+
+
+ORDERS_HELP = ("Every order placed in the period, by the day it was placed, and where it is now. Paid includes delivered. "
+               "Sales in rand only count paid orders, by the day they were paid.")
+
+
+def orders_over_time(df: pd.DataFrame, start: date, end: date, every: str) -> pd.DataFrame:
+    """Orders placed per week or month, split into Paid, Unpaid and Cancelled: period, kind, orders."""
+    s = between(df, "created_day", start, end).copy()
+    s["kind"] = "Unpaid"
+    s.loc[s["sold"], "kind"] = "Paid"
+    s.loc[s["status"] == "Cancelled", "kind"] = "Cancelled"
+    if every == "Month":
+        s["period"] = s["created_day"].dt.to_period("M").dt.to_timestamp()
+        index = pd.date_range(pd.Timestamp(start).replace(day=1), pd.Timestamp(end), freq="MS")
+    else:
+        s["period"] = s["created_day"] - pd.to_timedelta(s["created_day"].dt.weekday, unit="D")
+        index = pd.date_range(pd.Timestamp(start) - pd.Timedelta(days=start.weekday()), pd.Timestamp(end), freq="7D")
+    kinds = ["Paid", "Unpaid", "Cancelled"]
+    g = s.groupby(["period", "kind"])["invoice"].count()
+    full = pd.MultiIndex.from_product([index, kinds], names=["period", "kind"])
+    return g.reindex(full, fill_value=0).rename("orders").reset_index()
 
 
 def sales_over_time(df: pd.DataFrame, start: date, end: date, every: str) -> pd.DataFrame:
@@ -244,6 +266,157 @@ def repeat_rate(df: pd.DataFrame, end: date) -> float | None:
         return None
     n = s.groupby("customer")["invoice"].count()
     return float((n > 1).mean() * 100)
+
+
+# ---------------------------------------------------------------------------
+# Investor view: the numbers people ask for in a pitch, all time up to a day
+# ---------------------------------------------------------------------------
+
+def pitch(df: pd.DataFrame, books: dict, end: date) -> dict:
+    """Traction, run rate, growth, unit economics, customers and cash, up to `end`.
+    A figure that can't be worked out yet (no batches, no marketing spend) is None."""
+    e = pd.Timestamp(end)
+    sold = df[df["sold"] & (df["sale_day"] <= e)]
+    first = df["created_day"].min()
+    split = order_split(df, first.date() if pd.notna(first) else end, end)
+    sales_to_date = float(sold["total"].sum())
+    paid = len(sold)
+    last30 = sales_summary(df, end - timedelta(days=29), end)
+    prev30 = sales_summary(df, end - timedelta(days=59), end - timedelta(days=30))
+    sachets = int(sold["qty"].sum())
+    sachet_income = float((sold["total"] - sold["fee"]).sum())
+    price = sachet_income / sachets if sachets else None
+
+    f = books_frames(books)
+    made = f["batch"][f["batch"]["day"] <= e]
+    cost = float(made["cost"].sum() / made["sachets"].sum()) if made["sachets"].sum() else None
+    cost_from = "batches" if cost is not None else None
+    if cost is None and sachets:
+        # No batches yet: ingredients and packaging bought so far, per sachet sold.
+        ex_all = f["expense"][f["expense"]["day"] <= e]
+        making = float(ex_all.loc[ex_all["category"].isin(["Ingredients", "Packaging"]), "amount"].sum())
+        if making:
+            cost, cost_from = making / sachets, "expenses"
+    margin_pct = (price - cost) / price * 100 if price and cost is not None else None
+
+    people = customers(df[df["sale_day"] <= e]) if paid else customers(df.iloc[0:0])
+    n_customers = len(people)
+    spend_per_customer = float(people["spent"].mean()) if n_customers else None
+    ex = f["expense"][f["expense"]["day"] <= e]
+    marketing_spend = float(ex.loc[ex["category"] == "Marketing", "amount"].sum())
+    discounts = float(sold["discount"].sum())  # promo codes: money we chose not to take, to win and keep customers
+    marketing = marketing_spend + discounts
+    cac = marketing / n_customers if marketing and n_customers else None
+    ltv = spend_per_customer * margin_pct / 100 if spend_per_customer is not None and margin_pct is not None else None
+
+    m = f["money"][f["money"]["day"] <= e]
+    put_in = float(m.loc[m["kind"].isin(["Loan", "Capital"]), "amount"].sum())
+    paid_personally = float(ex.loc[ex["paidBy"] != BUSINESS, "amount"].sum())
+    spent_total = float(ex["amount"].sum())
+
+    # Burn: the average monthly profit over the last three months (the current one included).
+    since = (e - pd.DateOffset(months=2)).replace(day=1).date()
+    pnl = monthly_pnl(books, since, end)
+    avg_profit = float(pnl["profit"].mean()) if len(pnl) else 0.0
+    cash = cash_over_time(books, end)
+    on_hand = float(cash["cash"].iloc[-1]) if len(cash) else 0.0
+    burn = -avg_profit if avg_profit < 0 else 0.0
+    return {
+        "sales_to_date": sales_to_date, "orders": split, "paid_orders": paid, "sachets": sachets,
+        "customers": n_customers, "repeat_rate": repeat_rate(df, end),
+        "last30": last30["revenue"], "prev30": prev30["revenue"], "growth": change(last30["revenue"], prev30["revenue"]),
+        "annual_run_rate": last30["revenue"] * 12,
+        "aov": sales_to_date / paid if paid else None,
+        "price": price, "cost": cost, "gross_profit": (price - cost) if price is not None and cost is not None else None,
+        "margin_pct": margin_pct, "cost_from": cost_from,
+        "marketing": marketing, "marketing_spend": marketing_spend, "discounts": discounts, "cac": cac, "spend_per_customer": spend_per_customer, "ltv": ltv,
+        "ltv_cac": ltv / cac if ltv is not None and cac else None,
+        "put_in": put_in + paid_personally, "spent_total": spent_total,
+        "avg_monthly_profit": avg_profit, "burn": burn, "cash": on_hand,
+        "runway_months": on_hand / burn if burn > 0 else None,
+        "first_order": first.date() if pd.notna(first) else None,
+    }
+
+
+def unit_economics(df: pd.DataFrame, books: dict, end: date) -> pd.DataFrame:
+    """One sachet, all time up to `end`: what comes in and where it goes, per sachet sold.
+
+    In: the full price and the delivery fee charged. Out: each promo code's discount (a marketing cost),
+    every expense in the books by category, and the card fees, each divided by the sachets sold. What's left is the
+    profit per sachet. Rows: part, amount (rand per sachet, costs as positive numbers), kind
+    ('In', 'Promo', 'Cost', 'Profit' or 'Loss'). Empty when nothing has been sold."""
+    e = pd.Timestamp(end)
+    sold = df[df["sold"] & (df["sale_day"] <= e)]
+    n = float(sold["qty"].sum())
+    if not n:
+        return pd.DataFrame(columns=["part", "amount", "kind"])
+    rows = [("Full price", float(sold["items"].sum()) / n, "In"),
+            ("Delivery fees charged", float(sold["fee"].sum()) / n, "In")]
+    by_code = sold[sold["discount"] > 0].assign(code=lambda d: d["code"].where(d["code"] != "", "No code")) \
+        .groupby("code")["discount"].sum().sort_values(ascending=False)
+    for code, amount in by_code.items():
+        rows.append((f"Promo: {code}", float(amount) / n, "Promo"))
+    f = books_frames(books)
+    ex = f["expense"][f["expense"]["day"] <= e]
+    by = ex.groupby("category")["amount"].sum()
+    for c in CATEGORIES + [c for c in by.index if c not in CATEGORIES]:
+        if c in by.index and by[c]:
+            rows.append((c, float(by[c]) / n, "Cost"))
+    web = f["sales"][f["sales"]["day"] <= e]
+    fees = float(card_fee(web, books).sum())
+    if fees and "Payment fees" not in by.index:
+        rows.append(("Card fees (estimated)", fees / n, "Cost"))
+    t = pd.DataFrame(rows, columns=["part", "amount", "kind"])
+    t = t[t["amount"] > 0]
+    profit = t.loc[t["kind"] == "In", "amount"].sum() - t.loc[t["kind"].isin(["Cost", "Promo"]), "amount"].sum()
+    return pd.concat([t, pd.DataFrame([("Profit per sachet" if profit >= 0 else "Loss per sachet", abs(profit),
+                                        "Profit" if profit >= 0 else "Loss")], columns=["part", "amount", "kind"])],
+                     ignore_index=True)
+
+
+def promo_codes(df: pd.DataFrame, end: date) -> pd.DataFrame:
+    """Each promo code, all time up to `end`: what it cost and what it brought in.
+
+    code, percent (discount on the full price), orders and sachets (paid), sales (what was paid),
+    discount (what it cost), new (customers whose first paid order used it), per_new (cost per
+    new customer), waiting (orders with the code not paid yet). Most-used first."""
+    cols = ["code", "percent", "orders", "sachets", "sales", "discount", "new", "per_new", "waiting"]
+    e = pd.Timestamp(end)
+    sold = df[df["sold"] & (df["sale_day"] <= e)]
+    used = sold[sold["code"] != ""]
+    if used.empty:
+        return pd.DataFrame(columns=cols)
+    first_code = sold.sort_values("sale_day").groupby("customer")["code"].first()
+    open_ = df[~df["sold"] & (df["status"] != "Cancelled") & (df["created_day"] <= e)]
+    rows = []
+    for code, g in used.groupby("code"):
+        new = int((first_code == code).sum())
+        items = float(g["items"].sum())
+        disc = float(g["discount"].sum())
+        rows.append((code, round(disc / items * 100) if items else 0, len(g), int(g["qty"].sum()), float(g["total"].sum()),
+                     disc, new, disc / new if new else None, int((open_["code"] == code).sum())))
+    return pd.DataFrame(rows, columns=cols).sort_values(["orders", "discount"], ascending=False).reset_index(drop=True)
+
+
+def sales_growth(df: pd.DataFrame, start: date, end: date, every: str) -> pd.DataFrame:
+    """Sales per week or month with the change on the one before: period, revenue, growth (percent or None)."""
+    t = sales_over_time(df, start, end, every)[["period", "revenue", "orders", "sachets"]]
+    prev = t["revenue"].shift(1)
+    t["growth"] = [None if (p is None or pd.isna(p) or p == 0) else (r - p) / p * 100 for r, p in zip(t["revenue"], prev)]
+    return t
+
+
+def customers_to_date(df: pd.DataFrame, start: date, end: date, every: str) -> pd.DataFrame:
+    """How many different people had bought by the end of each week or month: period, customers."""
+    s = df[df["sold"] & (df["sale_day"] <= pd.Timestamp(end))]
+    first = s.groupby("customer")["sale_day"].min()
+    if every == "Month":
+        index = pd.date_range(pd.Timestamp(start).replace(day=1), pd.Timestamp(end), freq="MS")
+        ends = [min(p + pd.offsets.MonthEnd(0), pd.Timestamp(end)) for p in index]
+    else:
+        index = pd.date_range(pd.Timestamp(start) - pd.Timedelta(days=start.weekday()), pd.Timestamp(end), freq="7D")
+        ends = [min(p + pd.Timedelta(days=6), pd.Timestamp(end)) for p in index]
+    return pd.DataFrame({"period": index, "customers": [int((first <= x).sum()) for x in ends]})
 
 
 # ---------------------------------------------------------------------------
