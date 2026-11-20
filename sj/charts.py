@@ -213,6 +213,59 @@ def growth_bars(df: pd.DataFrame, every: str) -> alt.Chart:
     return bars + text
 
 
+# Spend in shades of red, darkest for the biggest; what's left in green.
+REDS = ["#7a0c12", "#9e1b1f", "#bf2c2c", "#d64545", "#e46a6a", "#ee9090", "#f5b5b5", "#f9d3d3"]
+LEFT = SLOTS[2]
+
+
+def money_split(df: pd.DataFrame) -> tuple[alt.Chart, pd.DataFrame]:
+    """One horizontal bar: the money a sachet brings in, cut into what each cost takes (red, darkest
+    = biggest) and what's left (green, at the end). df: part, amount, kind (from metrics.unit_economics).
+    Returns the chart and its rows (part, amount, share), biggest spend first."""
+    money_in = float(df.loc[df["kind"] == "In", "amount"].sum())
+    spend = df[df["kind"].isin(["Cost", "Promo"])].sort_values("amount", ascending=False)
+    left = money_in - float(spend["amount"].sum())
+    rows = [(r.part, float(r.amount)) for r in spend.itertuples()]
+    rows.append(("Left over" if left >= 0 else "Short (a loss)", abs(left)))
+    whole = max(money_in, float(spend["amount"].sum()))
+    t = pd.DataFrame(rows, columns=["part", "amount"])
+    t["share"] = t["amount"] / whole * 100 if whole else 0
+    t["end"] = t["amount"].cumsum()
+    t["start"] = t["end"] - t["amount"]
+    t["mid"] = (t["start"] + t["end"]) / 2
+    t["key"] = [f"{p}  ·  R {a:,.2f}  ·  {s:.0f}%".replace(",", " ") for p, a, s in zip(t["part"], t["amount"], t["share"])]
+    t["name"] = t["part"].str.replace("Promo: ", "", regex=False)
+    t["value"] = [f"R {a:.2f}" for a in t["amount"]]
+    t["show"] = t["share"] >= 10  # names inside the bar only where there's room; the key underneath lists every piece
+    colours = [REDS[min(i, len(REDS) - 1)] for i in range(len(spend))] + [LEFT if left >= 0 else "#3d0507"]
+    ink = ["#ffffff" if i < 5 else INK for i in range(len(spend))] + ["#ffffff"]
+    t["ink"] = ink
+    t["colour"] = colours
+    base = alt.Chart(t).encode(
+        x=alt.X("start:Q", title=None, axis=None, scale=alt.Scale(domain=[0, whole], nice=False)),
+        tooltip=[alt.Tooltip("part:N", title=" "), alt.Tooltip("value:N", title="Per sachet"),
+                 alt.Tooltip("share:Q", title="Share of money in (%)", format=".0f")],
+    )
+    bar = base.mark_bar(height=56, cornerRadius=0, stroke="white", strokeWidth=1.5).encode(
+        x2="end:Q",
+        color=alt.Color("key:N", sort=t["key"].tolist(), scale=alt.Scale(domain=t["key"].tolist(), range=colours), legend=None),
+    )
+    shown = base.transform_filter("datum.show")
+    name = shown.mark_text(dy=-8, fontSize=11, fontWeight=600).encode(x="mid:Q", text="name:N", color=alt.Color("ink:N", scale=None))
+    value = shown.mark_text(dy=8, fontSize=11).encode(x="mid:Q", text="value:N", color=alt.Color("ink:N", scale=None))
+    return (bar + name + value).properties(height=60), t[["part", "amount", "share", "colour"]]
+
+
+def money_key(rows: pd.DataFrame) -> str:
+    """The key under the money bar, as HTML: a swatch, the name, the amount and its share, in two columns."""
+    items = "".join(
+        f'<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:0.85rem;color:{INK}">'
+        f'<span style="width:12px;height:12px;border-radius:3px;background:{r.colour};flex:none"></span>'
+        f'<span style="flex:1">{r.part}</span><span style="color:{MUTED}">R {r.amount:.2f} · {r.share:.0f}%</span></div>'
+        for r in rows.itertuples())
+    return f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));column-gap:32px;margin:4px 0 8px">{items}</div>'
+
+
 def unit_bars(df: pd.DataFrame) -> alt.Chart:
     """df: part, amount, kind. One bar per line of a sachet's money, coloured by In, Cost or Profit,
     with + / − written before the amount."""

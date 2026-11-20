@@ -80,6 +80,11 @@ class Orders(unittest.TestCase):
         self.assertEqual(rows["Marketing"], (15.0, "Cost"))            # R 300 / 20
         self.assertEqual(rows["Profit per sachet"], (25.45, "Profit"))
         self.assertTrue(metrics.unit_economics(self.df, {}, date(2026, 9, 29)).empty, "nothing sold yet")
+        from sj import charts
+        _, split = charts.money_split(u)
+        self.assertEqual(split["part"].tolist()[0], "Marketing", "the biggest spend comes first")
+        self.assertEqual(split["part"].tolist()[-1], "Left over")
+        self.assertAlmostEqual(split["share"].sum(), 100)
         pc = metrics.promo_codes(self.df, date(2026, 10, 31))
         self.assertEqual(pc.to_dict("records"), [{"code": "SUPA15", "percent": 15, "orders": 1, "sachets": 10, "sales": 409.0,
                                                   "discount": 60.0, "new": 1, "per_new": 60.0, "waiting": 0}])

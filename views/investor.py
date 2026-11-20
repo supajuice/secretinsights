@@ -96,8 +96,9 @@ if not ue.empty:
     money_in = ue.loc[ue["kind"] == "In", "amount"].sum()
     last = ue.iloc[-1]
     margin = (last["amount"] if last["kind"] == "Profit" else -last["amount"]) / money_in * 100 if money_in else 0
-    note = (f"Per sachet sold, all time: money in {charts.rand(money_in, True)}, "
-            f"{'profit' if margin >= 0 else 'loss'} {charts.rand(abs(last['amount']), True)}, a {margin:.0f}% margin. "
+    note = (f"Where the {charts.rand(money_in, True)} a sachet brings in goes (full price + delivery fee, all time). "
+            f"Red is spend, darkest for the biggest; green is what's left: {charts.rand(abs(last['amount']), True)}, "
+            f"a {margin:.0f}% margin. "
             "Promo codes are counted as a marketing cost. Other costs are every expense in the books so far ÷ sachets sold, "
             "so stock that isn't sold yet makes them look higher.")
 else:
@@ -106,9 +107,14 @@ with charts.card("Unit economics: one sachet", note):
     if ue.empty:
         st.caption("No sales yet.")
     else:
-        charts.show(charts.unit_bars(ue),
-                    ue.assign(amount=ue["amount"].round(2)).rename(columns={"part": " ", "amount": "Per sachet (R)", "kind": "Kind"}),
-                    key="inv_unit", height=max(140, 34 * len(ue)))
+        chart, split_rows = charts.money_split(ue)
+        st.altair_chart(chart, width="stretch")
+        st.markdown(charts.money_key(split_rows), unsafe_allow_html=True)
+        with st.expander("See the numbers", expanded=False):
+            st.dataframe(pd.concat([ue[ue["kind"] == "In"][["part", "amount"]].assign(share=float("nan")), split_rows.drop(columns="colour")])
+                         .assign(amount=lambda d: d["amount"].round(2), share=lambda d: d["share"].round(0))
+                         .rename(columns={"part": " ", "amount": "Per sachet (R)", "share": "Share of money in (%)"}),
+                         hide_index=True, width="stretch", key="inv_unit")
 
 pc = metrics.promo_codes(orders, end)
 with charts.card("Promo codes: what each one cost, and what it brought",
